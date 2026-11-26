@@ -180,11 +180,17 @@ test('GitHub 설명: 영어가 첫 페이지이고, 언어마다 모든 언어�
   for (const r of readmes) {
     const text = fs.readFileSync(r.from, 'utf8');
     assert.ok(text.includes('<!-- languages -->'), `${r.lang}: 언어 단추 자리 표시가 없음`);
+    // 공개 저장소 안내: 비공식 표시, 라이선스, 보안 신고 안내로 가는 링크가 있다
+    assert.match(text, /Anthropic/, `${r.lang}: 비공식 안내가 없음`);
+    assert.ok(text.includes('](LICENSE)') && text.includes('](SECURITY.md)'), `${r.lang}: 라이선스나 보안 안내 링크가 없음`);
     // 그 언어의 설명은 그 언어 폴더나 공통 폴더의 그림만 쓴다 (다른 언어 그림을 잘못 가리키지 않게)
     for (const m of text.matchAll(/docs\/images\/([^/]+)\//g)) assert.ok(m[1] === r.lang || m[1] === 'common', `${r.lang}: 다른 언어의 그림을 씀 (${m[0]})`);
     // 가리키는 그림이 github/images 아래에 실제로 있다
     for (const m of text.matchAll(/\]\((docs\/images\/[^)]+)\)/g)) {
       assert.ok(fs.existsSync(path.join(githubDir, 'images', m[1].slice('docs/images/'.length))), `${r.lang}: 그림 없음 ${m[1]}`);
     }
+  }
+  for (const file of ['LICENSE', 'github/SECURITY.md', 'github/.github/ISSUE_TEMPLATE/bug_report.yml']) {
+    assert.ok(fs.existsSync(path.join(ROOT, file)), `공개 저장소 파일이 없음: ${file}`);
   }
 });

@@ -1,0 +1,50 @@
+name: Bug report / 버그 신고
+description: Something does not work as expected. / 프로그램이 기대대로 동작하지 않아요.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is a personal project, so replies can take some time. **Security problems:** do not post them here. See SECURITY.md.
+        개인 프로젝트라 답이 늦을 수 있습니다. **보안 문제**는 여기 올리지 말고 SECURITY.md를 봐 주세요.
+  - type: input
+    id: version
+    attributes:
+      label: Version / 버전
+      placeholder: "1.0.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS / 운영체제
+      options:
+        - Windows 11
+        - Windows 10
+        - macOS (Apple silicon)
+        - macOS (Intel)
+        - Other / 기타
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened? / 무슨 일이 있었나요?
+      description: What did you expect, and what happened instead? / 무엇을 기대했고 실제로는 어땠나요?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce / 재현 방법
+      placeholder: |
+        1.
+        2.
+  - type: textarea
+    id: log
+    attributes:
+      label: Log (optional) / 로그 (선택)
+      description: |
+        The log is in `~/.claude-pet` (Windows: `%USERPROFILE%\.claude-pet`). **Remove your session titles and folder names before you paste it.**
+        로그는 `~/.claude-pet`에 있습니다. **붙이기 전에 세션 제목과 폴더 이름을 지워 주세요.**
+      render: text

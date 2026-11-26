@@ -1,6 +1,7 @@
 // GitHub 저장소용 폴더를 만든다(또는 새로 고친다). 프로젝트 폴더(OneDrive)에는 .git을 만들지 않으므로, 올릴 파일만 다른 폴더로 복사한다.
 // 실행: node tools/export-github.js [--out=폴더]   (기본: ~/claude-pet-github)
-// 넣는 것: 프로그램 소스, 함께 나가는 펫, 시험, 배포·3D 생성 도구, GitHub용 설명과 스크린샷(github/), 개발 안내(README.md → docs/DEVELOPMENT.ko.md)
+// 넣는 것: 프로그램 소스, 함께 나가는 펫, 시험, 배포·3D 생성 도구, LICENSE, GitHub용 설명과 스크린샷(github/),
+//          보안 안내(github/SECURITY.md), 이슈 양식(github/.github/), 개발 안내(README.md → docs/DEVELOPMENT.ko.md)
 // 넣지 않는 것: CLAUDE.md(이 PC의 작업 기록), 시안/, 설정·로그(~/.claude-pet), 배포 zip(Releases에 따로 올린다)
 //
 // GitHub 설명은 언어마다 github/README.<언어>.md 하나씩 둔다. 영어(README.en.md)가 첫 페이지(README.md)가 되고,
@@ -19,11 +20,12 @@ const DEFAULT_OUT = path.join(os.homedir(), 'claude-pet-github');
 const FILES = [                                  // 그대로 복사하는 파일
   'main.js', 'preload.js', 'config.js', 'pets.js', 'pet3d.js', 'sessions.js', 'watcher.js', 'claude-app.js',
   'autostart.js', 'hook-event.js', 'install-hooks.js', 'i18n.js', 'zip.js', 'pet-import.js', 'launch.js',
-  'pet.html', 'settings.html', 'welcome.html', 'package.json', '펫 실행.bat', '펫 실행.command',
+  'pet.html', 'settings.html', 'welcome.html', 'package.json', 'LICENSE', '펫 실행.bat', '펫 실행.command',
   'assets/tray.png', 'tools/package.js', 'tools/export-github.js',
 ];
 const FOLDERS = ['pets', 'tests', 'tools/pet3d'];   // 통째로 복사하는 폴더
-const RENAMED = [['README.md', 'docs/DEVELOPMENT.ko.md']];   // 이름이나 위치를 바꿔 복사하는 것
+const RENAMED = [['README.md', 'docs/DEVELOPMENT.ko.md'], ['github/SECURITY.md', 'SECURITY.md']];   // 이름이나 위치를 바꿔 복사하는 것
+const RENAMED_FOLDERS = [['github/.github', '.github']];   // GitHub 설정 폴더 (이슈 양식)
 const GITHUB_DIR = 'github';
 const README_PATTERN = /^README\.([a-z]{2}(?:-[A-Z]{2})?)\.md$/;
 const DEFAULT_README_LANG = 'en';                // 첫 페이지 언어
@@ -123,6 +125,7 @@ function main() {
   for (const rel of FILES) copyFile(rel, rel, outDir);
   for (const rel of FOLDERS) copyFolder(rel, rel, outDir);
   for (const [from, to] of RENAMED) copyFile(from, to, outDir);
+  for (const [from, to] of RENAMED_FOLDERS) copyFolder(from, to, outDir);
   copyFolder(IMAGES_FROM, IMAGES_TO, outDir);
   // 언어별 설명: 단추 줄을 넣고, 깨진 그림·링크가 없는지 확인한 뒤 쓴다
   const problems = [];

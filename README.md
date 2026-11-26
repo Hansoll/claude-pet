@@ -5,6 +5,8 @@
 
 # Claude Pet
 
+> **Unofficial.** Claude Pet is a personal project. It is not made by, affiliated with, or endorsed by Anthropic. "Claude" is a trademark of Anthropic.
+
 A desktop pet that shows the progress of your Claude Code sessions.
 It shows what Claude is doing in a speech bubble, and tells you with motion and sound when a turn is done or needs your approval.
 
@@ -87,6 +89,7 @@ The macOS build is prepared but not yet tested on a Mac. When it is released:
 
 - **It never connects to the internet.** A test (`tests/wiring.test.js`) checks that the program has no network code and no outside addresses.
 - **Imported pet archives** are checked: only `pet.json` and the sprite sheet are extracted. Executables, paths that leave the pet folder, oversized files and zip bombs are rejected.
+- **Found a security problem?** Please report it privately as described in [SECURITY.md](SECURITY.md), not in a public issue.
 
 ## Uninstall
 
@@ -113,3 +116,8 @@ The internal design notes are in Korean: [docs/DEVELOPMENT.ko.md](docs/DEVELOPME
 - It shows Claude Code sessions only (desktop app Code tab, CLI, IDE extensions). Regular chats are not shown.
 - Opening a session works exactly only for sessions created in the Claude desktop app.
 - The pet's UI is available in English and Korean. Session titles you wrote stay as you wrote them.
+- This is a personal project, so replies to issues can take some time. When you attach a log (`~/.claude-pet`), remove your session titles first.
+
+## License
+
+[MIT](LICENSE). This covers everything in this repository, including the Mochi pet.

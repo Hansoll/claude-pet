@@ -19,7 +19,7 @@ const ARGS = process.argv.slice(2);
 const APP_FILES = [                              // 배포판에 넣는 프로그램 파일 (이것 말고는 넣지 않는다)
   'main.js', 'preload.js', 'config.js', 'pets.js', 'pet3d.js', 'sessions.js', 'watcher.js', 'claude-app.js',
   'autostart.js', 'hook-event.js', 'install-hooks.js', 'i18n.js', 'zip.js', 'pet-import.js',
-  'pet.html', 'settings.html', 'welcome.html', 'assets/tray.png',
+  'pet.html', 'settings.html', 'welcome.html', 'assets/tray.png', 'LICENSE',
 ];
 const APP_PET_DIRS = ['orange-pickle', 'orange-pickle-3d'];   // 함께 넣는 펫
 const WIN_EXE = 'ClaudePet.exe';
