@@ -24,6 +24,10 @@ const APP_FILES = [                              // 배포판에 넣는 프로�
 const APP_PET_DIRS = ['orange-pickle', 'orange-pickle-3d'];   // 함께 넣는 펫
 const WIN_EXE = 'ClaudePet.exe';
 const WIN_SKIP = new Set(['resources/default_app.asar']);     // Electron 기본 화면 (배포판에는 필요 없다)
+// Chromium 화면 문구(locales/*.pak, 55개 49MB)는 펫이 지원하는 언어만 넣는다. 없는 언어는 Electron이 en-US로 대신한다.
+// 펫에 언어를 더하면(config.LANGUAGES) 여기서 맞는 파일 이름이 자동으로 들어간다. 이름이 다른 언어만 아래 표에 적는다
+const CHROMIUM_LOCALE_NAMES = { en: ['en-US'], zh: ['zh-CN', 'zh-TW'], pt: ['pt-BR', 'pt-PT'], es: ['es', 'es-419'] };
+const KEEP_LOCALES = new Set(['en-US'].concat(...config.LANGUAGES.map((code) => CHROMIUM_LOCALE_NAMES[code] || [code])));
 const MAC_ARCHS = ['arm64', 'x64'];
 const MAC_COMMAND = 'Claude Pet.command';
 const RELEASE_BASE = `https://github.com/electron/electron/releases/download/v${config.ELECTRON_VERSION}`;
@@ -219,6 +223,8 @@ function buildWindows(app, outDir) {
   const writer = zip.createWriter();
   for (const file of walk(electronDir, electronDir)) {
     if (WIN_SKIP.has(file.rel)) continue;
+    const locale = /^locales\/(.+)\.pak$/.exec(file.rel);
+    if (locale && !KEEP_LOCALES.has(locale[1])) continue;
     const rel = file.rel === 'electron.exe' ? WIN_EXE : file.rel;
     writer.addFile(`${top}/${rel}`, fs.readFileSync(file.full));
   }
@@ -259,8 +265,18 @@ async function main() {
     for (const arch of MAC_ARCHS) { built.push(await buildMac(app, outDir, arch)); console.log(`만듦: ${built[built.length - 1]}`); }
   }
   // 받는 사람이 같은 파일인지 확인할 수 있게 SHA256을 남긴다
+  // 한 OS만 다시 만들어도 다른 OS의 값은 남겨 둔다 (지금 폴더에 있는 zip만 적는다)
+  const sumsFile = path.join(outDir, 'SHA256SUMS.txt');
+  const sums = new Map();
+  if (fs.existsSync(sumsFile)) {
+    for (const line of fs.readFileSync(sumsFile, 'utf8').split(/\r?\n/)) {
+      const m = /^([0-9a-f]{64})\s+\*?(.+)$/.exec(line.trim());
+      if (m && fs.existsSync(path.join(outDir, m[2]))) sums.set(m[2], m[1]);
+    }
+  }
   const lines = built.map((file) => `${sha256(fs.readFileSync(file))}  ${path.basename(file)}`);
-  fs.writeFileSync(path.join(outDir, 'SHA256SUMS.txt'), lines.join('\n') + '\n', 'utf8');
+  for (const line of lines) { const [hash, name] = line.split(/\s+/); sums.set(name, hash); }
+  fs.writeFileSync(sumsFile, Array.from(sums.entries()).sort().map(([name, hash]) => `${hash}  ${name}`).join('\n') + '\n', 'utf8');
   console.log('\nSHA256:');
   for (const [i, line] of lines.entries()) console.log(`  ${line}  (${Math.round(fs.statSync(built[i]).size / 1024 / 1024)}MB)`);
   console.log(`\n폴더: ${outDir}`);

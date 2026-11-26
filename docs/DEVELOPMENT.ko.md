@@ -21,6 +21,22 @@ node tools/package.js
 - 나눠 줄 때 `SHA256SUMS.txt`의 값을 함께 알려 주면, 받는 사람이 같은 파일인지 확인할 수 있습니다 (윈도우: `Get-FileHash 파일.zip`, 맥: `shasum -a 256 파일.zip`).
 - 맥 묶음은 만들기만 했고 맥에서 실행해 보지 않았습니다.
 
+### GitHub에 올리기
+
+이 폴더는 OneDrive 동기화 폴더라 git을 쓰지 않습니다. 대신 올릴 파일만 다른 폴더로 복사합니다.
+
+```
+node tools/export-github.js        # ~/claude-pet-github 를 새로 채운다 (.git은 그대로)
+```
+
+그 폴더에서 커밋하고 푸시합니다. 배포 zip은 저장소에 넣지 않고 GitHub Releases에 올립니다 (`gh release create v<버전> <zip>`). zip 내용이 바뀌면 `package.json`의 버전을 올리고 새 Release를 만듭니다 (이미 올린 Release의 파일은 바꾸지 않음).
+
+GitHub 설명은 언어마다 `github/README.<언어>.md`에 있습니다. 영어(`README.en.md`)가 첫 페이지가 되고, 나머지는 `README.<언어>.md`로 나갑니다. 각 파일 맨 위의 `<!-- languages -->` 줄은 내보낼 때 모든 언어로 가는 단추 줄로 바뀝니다. 스크린샷은 `github/images/<언어>/`(언어별)와 `github/images/common/`(공통)에 둡니다.
+
+**새 언어 추가**: `github/README.<언어>.md`와 `github/images/<언어>/`를 만들면 단추가 자동으로 생깁니다. 단추 이름은 `tools/export-github.js`의 `LANGUAGE_NAMES`에서 고릅니다. 내보낼 때 깨진 그림이나 링크가 있으면 멈춥니다. 펫 화면 자체에 언어를 더하려면 `i18n.js`에 그 언어 표를 넣고 `config.js`의 `LANGUAGES`에 더합니다 (배포 zip의 Chromium 언어 파일도 따라서 들어갑니다).
+
+**맥 버전 올리기**: 맥에서 한 번 실행해 확인한 뒤, `node tools/package.js`(윈도우·맥 모두)로 같은 버전의 zip을 만들어 한 Release에 함께 올리고, 설명의 내려받기 표에서 macOS를 "준비 중"에서 받기 링크로 바꿉니다. 지금 `~/.claude-pet/dist`의 맥 zip(1.0.0)은 이후 고친 내용이 빠진 옛 파일이라 쓰지 않습니다.
+
 ### 처음 실행하면
 
 1. 컴퓨터의 언어로 화면 언어를 정합니다 (한국어 윈도우·맥은 한국어, 그 밖은 영어). 메뉴의 "언어 / Language"나 펫 꾸미기 창에서 바꿉니다.

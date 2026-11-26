@@ -166,3 +166,25 @@ test('설정: 펫 꾸미기 창의 크기와 준비된 색이 올바르다', () 
   }
   assert.ok(config.SCALE_MIN > 0 && config.SCALE_MAX > config.SCALE_MIN && config.SCALE_STEP > 0);
 });
+
+test('GitHub 설명: 영어가 첫 페이지이고, 언어마다 모든 언어로 가는 단추와 그 언어의 그림이 있다', () => {
+  const exporter = require('../tools/export-github.js');
+  const githubDir = path.join(ROOT, 'github');
+  const readmes = exporter.findReadmes(githubDir);
+  assert.equal(readmes[0].lang, 'en');
+  assert.equal(readmes[0].to, 'README.md');
+  assert.ok(readmes.some((r) => r.lang === 'ko' && r.to === 'README.ko.md'));
+  const bar = exporter.languageBar(readmes, 'ko');
+  for (const r of readmes) assert.ok(bar.includes(`href="${r.to}"`), `단추 없음: ${r.lang}`);
+  assert.ok(bar.includes(encodeURIComponent('한국어')));
+  for (const r of readmes) {
+    const text = fs.readFileSync(r.from, 'utf8');
+    assert.ok(text.includes('<!-- languages -->'), `${r.lang}: 언어 단추 자리 표시가 없음`);
+    // 그 언어의 설명은 그 언어 폴더나 공통 폴더의 그림만 쓴다 (다른 언어 그림을 잘못 가리키지 않게)
+    for (const m of text.matchAll(/docs\/images\/([^/]+)\//g)) assert.ok(m[1] === r.lang || m[1] === 'common', `${r.lang}: 다른 언어의 그림을 씀 (${m[0]})`);
+    // 가리키는 그림이 github/images 아래에 실제로 있다
+    for (const m of text.matchAll(/\]\((docs\/images\/[^)]+)\)/g)) {
+      assert.ok(fs.existsSync(path.join(githubDir, 'images', m[1].slice('docs/images/'.length))), `${r.lang}: 그림 없음 ${m[1]}`);
+    }
+  }
+});

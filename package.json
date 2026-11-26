@@ -1,6 +1,6 @@
 {
   "name": "claude-pet",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Claude Code 세션 진행 상황을 보여 주는 데스크톱 펫 (코덱스 펫 리소스 호환)",
   "main": "main.js",
   "private": true,
