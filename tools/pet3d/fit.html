@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>3D 펫 맞추기 도구</title>
+</head>
+<body>
+<script src="../../pet3d.js"></script>
+<script>
+'use strict';
+// 원본 시트의 칸에 3D 자세를 맞추는 계산을 하는 페이지. build.js가 불러서 쓴다 (사람이 직접 여는 화면이 아니다).
+
+// ── 설정 상수 ───────────────────────────────────────────────
+const CELL_W = PET3D.CELL_W;
+const CELL_H = PET3D.CELL_H;
+const DEFAULT_POSE = PET3D.DEFAULT_POSE;
+const DEFAULT_SHAPE = PET3D.DEFAULT_SHAPE;
+const ALPHA_SOLID = 128;         // 이 값 이상이면 몸으로 본다
+const ALPHA_FULL = 250;          // 이 값 이상이면 완전히 불투명한 픽셀로 본다
+const DARK_MAX = 75;             // 눈으로 보는 어두움 한도 (RGB 최댓값)
+const MIN_EYE_PIXELS = 20;       // 눈으로 인정하는 최소 픽셀 수
+const MATCAP_SIZE = 160;         // 빛 지도(법선 → 색) 한 변 크기
+const MATCAP_SUB = 4;            // 빛 지도를 만들 때 픽셀 하나를 나누는 수
+const MATCAP_BLUR = 2;           // 빛 지도 흐림 반지름 (원본의 잔무늬를 지운다)
+const EYE_MASK_GROW = 3;         // 눈 주변을 빛 지도에서 빼는 여유 픽셀
+const FIT_SS = 3;                // 맞추는 동안 픽셀당 표본 수(한 변)
+const LEAN_HIGH = 0.25;          // 기울기를 잴 때 보는 윗부분 높이 (몸 높이 대비)
+const LEAN_LOW = 0.85;           // 기울기를 잴 때 보는 아랫부분 높이
+
+let sheetCanvas = null;
+let sheetCtx = null;
+let glCanvas = null;
+let renderer = null;
+let matcapPixels = null;
+let shape = Object.assign({}, DEFAULT_SHAPE);
+
+// ── 원본 시트 ───────────────────────────────────────────────
+
+// 원본 시트를 읽어 캔버스에 올린다
+async function loadSheet(dataUrl) {
+  const image = new Image();
+  image.src = dataUrl;
+  await image.decode();
+  sheetCanvas = document.createElement('canvas');
+  sheetCanvas.width = image.naturalWidth;
+  sheetCanvas.height = image.naturalHeight;
+  sheetCtx = sheetCanvas.getContext('2d', { willReadFrequently: true });
+  sheetCtx.drawImage(image, 0, 0);
+  return { width: sheetCanvas.width, height: sheetCanvas.height };
+}
+
+// 시트에서 칸 하나의 픽셀을 꺼낸다
+function cellData(row, col) {
+  if (!sheetCtx) throw new Error('시트를 먼저 읽어야 함');
+  return sheetCtx.getImageData(col * CELL_W, row * CELL_H, CELL_W, CELL_H);
+}
+
+// 몸 모양 값을 정한다
+function setShape(next) {
+  shape = { a: next.a, bt: next.bt, bb: next.bb, nb: next.nb };
+  return shape;
+}
+
+// ── 맞추기 ──────────────────────────────────────────────────
+
+// 간단한 좌표별 탐색으로 손실을 줄인다 (나아지지 않으면 걸음을 반으로 줄인다)
+function minimize(loss, start, steps, rounds) {
+  let current = Object.assign({}, start);
+  let best = loss(current);
+  const step = Object.assign({}, steps);
+  const keys = Object.keys(step);
+  let evaluations = 1;
+  for (let round = 0; round < rounds; round++) {
+    let improved = false;
+    for (const key of keys) {
+      for (const direction of [1, -1]) {
+        let moved = false;
+        for (let repeat = 0; repeat < 8; repeat++) {
+          const trial = Object.assign({}, current);
+          trial[key] = current[key] + direction * step[key];
+          const value = loss(trial);
+          evaluations++;
+          if (value < best - 1e-9) { best = value; current = trial; improved = true; moved = true; } else break;
+        }
+        if (moved) break;
+      }
+    }
+    if (!improved) {
+      let tiny = true;
+      for (const key of keys) { step[key] *= 0.5; if (step[key] > steps[key] / 64) tiny = false; }
+      if (tiny) break;
+    }
+  }
+  return { params: current, loss: best, evaluations };
+}
+
+// 원본 윤곽에 몸 모양을 맞춘다 (픽셀 단위 불일치 수를 줄인다)
+function fitShape(row, col) {
+  const image = cellData(row, col);
+  const { width, height, data } = image;
+  const mask = new Uint8Array(width * height);
+  for (let i = 0; i < width * height; i++) mask[i] = data[i * 4 + 3] >= ALPHA_SOLID ? 1 : 0;
+  const loss = (p) => {
+    let wrong = 0;
+    const s = { a: p.a, bt: p.bt, bb: p.bb, nb: p.nb };
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const inside = PET3D.bodyHit(x + 0.5 - p.cx, p.cy - (y + 0.5), s) ? 1 : 0;
+        if (inside !== mask[y * width + x]) wrong++;
+      }
+    }
+    return wrong;
+  };
+  const start = { cx: DEFAULT_POSE.cx, cy: DEFAULT_POSE.cy, a: DEFAULT_SHAPE.a, bt: DEFAULT_SHAPE.bt, bb: DEFAULT_SHAPE.bb, nb: DEFAULT_SHAPE.nb };
+  return minimize(loss, start, { cx: 0.5, cy: 0.5, a: 0.5, bt: 0.5, bb: 0.5, nb: 0.1 }, 60);
+}
+
+// 원본 칸의 윤곽과 눈 위치로 자세의 처음 값을 어림한다. limitY가 있으면 그 줄 위쪽만 본다
+function estimateStart(row, col, limitY) {
+  const image = cellData(row, col);
+  const { width, height, data } = image;
+  const bottom = Number.isFinite(limitY) ? Math.min(height, limitY) : height;
+  let minX = width, maxX = -1, minY = height, maxY = -1;
+  const middles = new Array(height).fill(null);
+  for (let y = 0; y < bottom; y++) {
+    let left = -1, right = -1;
+    for (let x = 0; x < width; x++) {
+      if (data[(y * width + x) * 4 + 3] >= ALPHA_SOLID) { if (left < 0) left = x; right = x; }
+    }
+    if (left < 0) continue;
+    middles[y] = (left + right + 1) / 2;
+    if (left < minX) minX = left; if (right > maxX) maxX = right; if (y < minY) minY = y; if (y > maxY) maxY = y;
+  }
+  if (maxX < 0) return null;
+  const bodyHeight = maxY - minY + 1;
+  const sx = (maxX - minX + 1) / (2 * shape.a);
+  const sy = bodyHeight / (shape.bt + shape.bb);
+  // 기울기: 윗부분과 아랫부분의 가운데가 얼마나 어긋났는지
+  const highY = Math.round(minY + bodyHeight * LEAN_HIGH), lowY = Math.round(minY + bodyHeight * LEAN_LOW);
+  let shear = 0;
+  if (middles[highY] !== null && middles[lowY] !== null && lowY > highY) shear = (middles[highY] - middles[lowY]) / (lowY - highY);
+  const ground = maxY + 1;
+  const cx = middles[lowY] !== null ? middles[lowY] - shear * (ground - lowY) : (minX + maxX + 1) / 2;
+  const cy = minY + shape.bt * sy;
+  const out = { cx, cy, sx, sy, shear };
+  // 눈: 어두운 픽셀의 무게중심
+  let ex = 0, ey = 0, n = 0;
+  for (let y = minY; y <= maxY; y++) {
+    for (let x = minX; x <= maxX; x++) {
+      const i = (y * width + x) * 4;
+      if (data[i + 3] >= 200 && Math.max(data[i], data[i + 1], data[i + 2]) < DARK_MAX) { ex += x; ey += y; n++; }
+    }
+  }
+  if (n >= MIN_EYE_PIXELS) {
+    const eyeY = ey / n, eyeX = ex / n - shear * (ground - eyeY);
+    const X = (eyeX - cx) / sx, Y = (cy - eyeY) / sy;
+    const radius = Math.max(1, PET3D.profile(Y, shape));
+    out.pitch = Math.asin(PET3D.clamp(Y / (Y >= 0 ? shape.bt : shape.bb), -0.85, 0.85));
+    out.yaw = Math.asin(PET3D.clamp(X / radius, -0.9, 0.9));
+    out.eyePixels = n;
+  }
+  return out;
+}
+
+// ── 빛 지도 ─────────────────────────────────────────────────
+
+// 원본 한 칸에서 "법선 → 색" 지도를 뽑는다. 눈과 가장자리는 빼고 주변 색으로 메운다
+function buildMatcap(row, col, pose) {
+  const image = cellData(row, col);
+  const { width, height, data } = image;
+  const size = MATCAP_SIZE;
+  // 쓰지 않을 픽셀: 반투명, 눈(어두움), 반짝임(흰색)과 그 둘레
+  const raw = new Uint8Array(width * height);
+  for (let i = 0; i < width * height; i++) {
+    const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2], a = data[i * 4 + 3];
+    if (a >= 200 && (Math.max(r, g, b) < 120 || Math.min(r, g, b) > 150)) raw[i] = 1;
+  }
+  const exclude = new Uint8Array(width * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      if (data[i * 4 + 3] < ALPHA_FULL) { exclude[i] = 1; continue; }
+      let near = false;
+      for (let dy = -EYE_MASK_GROW; dy <= EYE_MASK_GROW && !near; dy++) {
+        for (let dx = -EYE_MASK_GROW; dx <= EYE_MASK_GROW; dx++) {
+          const px = x + dx, py = y + dy;
+          if (px < 0 || py < 0 || px >= width || py >= height) continue;
+          if (raw[py * width + px]) { near = true; break; }
+        }
+      }
+      if (near) exclude[i] = 1;
+    }
+  }
+  const sum = new Float32Array(size * size * 3);
+  const weight = new Float32Array(size * size);
+  const sub = MATCAP_SUB;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x;
+      if (exclude[i]) continue;
+      for (let j = 0; j < sub; j++) {
+        for (let k = 0; k < sub; k++) {
+          const px = x + (k + 0.5) / sub, py = y + (j + 0.5) / sub;
+          const hit = PET3D.bodyHit((px - pose.cx) / pose.sx, (pose.cy - py) / pose.sy, shape);
+          if (!hit) continue;
+          const u = (0.5 + hit.nx * 0.5 * PET3D.MATCAP_K) * size - 0.5;
+          const v = (0.5 - hit.ny * 0.5 * PET3D.MATCAP_K) * size - 0.5;
+          const u0 = Math.floor(u), v0 = Math.floor(v), fu = u - u0, fv = v - v0;
+          for (let b = 0; b < 4; b++) {
+            const tu = u0 + (b & 1), tv = v0 + (b >> 1);
+            if (tu < 0 || tv < 0 || tu >= size || tv >= size) continue;
+            const w = ((b & 1) ? fu : 1 - fu) * ((b >> 1) ? fv : 1 - fv);
+            const t = tv * size + tu;
+            sum[t * 3] += data[i * 4] * w; sum[t * 3 + 1] += data[i * 4 + 1] * w; sum[t * 3 + 2] += data[i * 4 + 2] * w;
+            weight[t] += w;
+          }
+        }
+      }
+    }
+  }
+  const color = new Float32Array(size * size * 3);
+  const known = new Uint8Array(size * size);
+  let knownCount = 0;
+  for (let t = 0; t < size * size; t++) {
+    if (weight[t] > 0.5) {
+      known[t] = 1; knownCount++;
+      color[t * 3] = sum[t * 3] / weight[t]; color[t * 3 + 1] = sum[t * 3 + 1] / weight[t]; color[t * 3 + 2] = sum[t * 3 + 2] / weight[t];
+    }
+  }
+  // 빈 곳을 가까운 색으로 차례로 채운다
+  const filled = Uint8Array.from(known);
+  let remaining = size * size - knownCount;
+  while (remaining > 0) {
+    const adds = [];
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const t = y * size + x;
+        if (filled[t]) continue;
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const px = x + dx, py = y + dy;
+          if (px < 0 || py < 0 || px >= size || py >= size) continue;
+          const q = py * size + px;
+          if (!filled[q]) continue;
+          r += color[q * 3]; g += color[q * 3 + 1]; b += color[q * 3 + 2]; n++;
+        }
+        if (n) adds.push([t, r / n, g / n, b / n]);
+      }
+    }
+    if (!adds.length) break;
+    for (const [t, r, g, b] of adds) { color[t * 3] = r; color[t * 3 + 1] = g; color[t * 3 + 2] = b; filled[t] = 1; }
+    remaining -= adds.length;
+  }
+  // 채운 곳만 여러 번 고르게 펴서 경계가 드러나지 않게 한다
+  for (let pass = 0; pass < 200; pass++) {
+    const next = Float32Array.from(color);
+    for (let y = 1; y < size - 1; y++) {
+      for (let x = 1; x < size - 1; x++) {
+        const t = y * size + x;
+        if (known[t]) continue;
+        for (let c = 0; c < 3; c++) {
+          next[t * 3 + c] = (color[(t - 1) * 3 + c] + color[(t + 1) * 3 + c] + color[(t - size) * 3 + c] + color[(t + size) * 3 + c]) / 4;
+        }
+      }
+    }
+    color.set(next);
+  }
+  // 전체를 살짝 흐려 원본의 잔무늬를 지운다 (잔무늬는 그릴 때 따로 입힌다)
+  const blurred = boxBlur(boxBlur(color, size, MATCAP_BLUR), size, MATCAP_BLUR);
+  matcapPixels = new Uint8ClampedArray(size * size * 4);
+  for (let t = 0; t < size * size; t++) {
+    matcapPixels[t * 4] = blurred[t * 3]; matcapPixels[t * 4 + 1] = blurred[t * 3 + 1]; matcapPixels[t * 4 + 2] = blurred[t * 3 + 2]; matcapPixels[t * 4 + 3] = 255;
+  }
+  initGL();
+  renderer.setMatcap(matcapPixels, size);
+  return { size, knownRatio: +(knownCount / (size * size)).toFixed(3) };
+}
+
+// 3채널 그림을 상자 흐림한다
+function boxBlur(source, size, radius) {
+  const out = new Float32Array(source.length);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let dy = -radius; dy <= radius; dy++) for (let dx = -radius; dx <= radius; dx++) {
+        const px = Math.min(size - 1, Math.max(0, x + dx)), py = Math.min(size - 1, Math.max(0, y + dy));
+        const q = (py * size + px) * 3;
+        r += source[q]; g += source[q + 1]; b += source[q + 2]; n++;
+      }
+      const t = (y * size + x) * 3;
+      out[t] = r / n; out[t + 1] = g / n; out[t + 2] = b / n;
+    }
+  }
+  return out;
+}
+
+// 빛 지도를 그림 파일로 내보낸다
+function matcapDataUrl() {
+  if (!matcapPixels) throw new Error('빛 지도가 아직 없음');
+  const canvas = document.createElement('canvas');
+  canvas.width = MATCAP_SIZE; canvas.height = MATCAP_SIZE;
+  canvas.getContext('2d').putImageData(new ImageData(matcapPixels, MATCAP_SIZE, MATCAP_SIZE), 0, 0);
+  return canvas.toDataURL('image/png');
+}
+
+// ── 그리기 ──────────────────────────────────────────────────
+
+// 그리기 도구를 준비하고 그래픽 장치 이름을 돌려준다
+function initGL() {
+  if (!renderer) {
+    glCanvas = document.createElement('canvas');
+    renderer = PET3D.createRenderer(glCanvas, { preserveDrawingBuffer: true });
+  }
+  return renderer.info();
+}
+
+// 맞추는 동안 쓰는 값(uni: 가로세로 같은 배율)을 실제 자세 값으로 풀어 쓴다
+function fullPose(pose) {
+  const full = Object.assign({}, pose);
+  if (full.uni !== undefined) { full.sx = full.uni; full.sy = full.uni; }
+  return full;
+}
+
+// 자세 값으로 한 장을 그린다
+function draw(pose, scale, ss) {
+  initGL();
+  return renderer.draw(fullPose(pose), shape, scale, ss);
+}
+
+// 방금 그린 그림의 픽셀을 위에서 아래 순서로 읽는다 (알파가 곱해진 값)
+function readPixels(width, height) {
+  const gl = renderer.gl;
+  const raw = new Uint8Array(width * height * 4);
+  gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, raw);
+  const out = new Uint8Array(width * height * 4);
+  for (let y = 0; y < height; y++) out.set(raw.subarray((height - 1 - y) * width * 4, (height - y) * width * 4), y * width * 4);
+  return out;
+}
+
+// 원본 칸을 알파가 곱해진 값으로 바꾼다
+function targetPixels(row, col) {
+  const data = cellData(row, col).data;
+  const out = new Uint8Array(data.length);
+  for (let i = 0; i < data.length; i += 4) {
+    const a = data[i + 3] / 255;
+    out[i] = Math.round(data[i] * a); out[i + 1] = Math.round(data[i + 1] * a); out[i + 2] = Math.round(data[i + 2] * a); out[i + 3] = data[i + 3];
+  }
+  return out;
+}
+
+// 두 그림의 평균 차이 (0~255, 색 3채널과 투명도)
+function pixelLoss(a, b) {
+  let total = 0;
+  for (let i = 0; i < a.length; i++) total += Math.abs(a[i] - b[i]);
+  return total / (a.length / 4);
+}
+
+// 자세 값 일부를 원본 칸에 맞춘다
+function fitPose(row, col, start, steps, rounds) {
+  const target = targetPixels(row, col);
+  const loss = (pose) => {
+    const size = draw(pose, 1, FIT_SS);
+    return pixelLoss(readPixels(size.width, size.height), target);
+  };
+  const result = minimize(loss, start, steps, rounds);
+  result.params = fullPose(result.params);
+  return result;
+}
+
+// 원본과 3D 그림의 차이를 잰다 (윤곽 겹침, 색 차이)
+function measure(row, col, pose) {
+  const target = targetPixels(row, col);
+  const size = draw(pose, 1, 4);
+  const mine = readPixels(size.width, size.height);
+  let both = 0, either = 0, colorSum = 0, colorCount = 0;
+  for (let i = 0; i < target.length; i += 4) {
+    const a = target[i + 3] >= ALPHA_SOLID, b = mine[i + 3] >= ALPHA_SOLID;
+    if (a && b) both++;
+    if (a || b) either++;
+    if (target[i + 3] >= ALPHA_FULL && mine[i + 3] >= ALPHA_FULL) {
+      colorSum += (Math.abs(target[i] - mine[i]) + Math.abs(target[i + 1] - mine[i + 1]) + Math.abs(target[i + 2] - mine[i + 2])) / 3;
+      colorCount++;
+    }
+  }
+  return {
+    overlap: +(both / Math.max(1, either) * 100).toFixed(1),
+    colorDiff: +(colorSum / Math.max(1, colorCount)).toFixed(1),
+  };
+}
+
+// 자세 하나를 몸에 맞춰 잘라 정사각형 아이콘 그림으로 만든다 (알림 영역 아이콘의 기본 그림용)
+function iconDataUrl(pose, size) {
+  const rendered = renderToCanvas(pose, 1, 3);
+  const region = PET3D.iconRegion(fullPose(pose), shape);
+  const canvas = document.createElement('canvas');
+  canvas.width = size; canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(rendered, region.x, region.y, region.size, region.size, 0, 0, size, size);
+  return canvas.toDataURL('image/png');
+}
+
+// ── 확인용 그림 ─────────────────────────────────────────────
+
+// 3D 그림 한 장을 2D 캔버스로 옮긴다
+function renderToCanvas(pose, scale, ss) {
+  draw(pose, scale, ss);
+  const canvas = document.createElement('canvas');
+  canvas.width = glCanvas.width; canvas.height = glCanvas.height;
+  canvas.getContext('2d').drawImage(glCanvas, 0, 0);
+  return canvas;
+}
+
+// 동작별로 원본 줄(위)과 3D 줄(아래)을 나란히 그린다. groups: [{ label, cells: [[row, col]], poses: [...] }]
+function rowsImage(groups) {
+  const CROP_TOP = 30, PAD = 12, LABEL = 22;
+  const FONT = '"Malgun Gothic", "Apple SD Gothic Neo", sans-serif';
+  const rowH = CELL_H - CROP_TOP;
+  const columns = Math.max(...groups.map((g) => g.cells.length));
+  const canvas = document.createElement('canvas');
+  canvas.width = PAD * 2 + columns * CELL_W;
+  canvas.height = PAD + groups.length * (LABEL + rowH * 2 + PAD);
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  groups.forEach((group, g) => {
+    const top = PAD + g * (LABEL + rowH * 2 + PAD);
+    ctx.font = `700 15px ${FONT}`; ctx.fillStyle = '#222222'; ctx.textBaseline = 'middle';
+    ctx.fillText(group.label, PAD, top + LABEL / 2);
+    group.cells.forEach(([row, col], i) => {
+      const x = PAD + i * CELL_W;
+      ctx.drawImage(sheetCanvas, col * CELL_W, row * CELL_H + CROP_TOP, CELL_W, rowH, x, top + LABEL, CELL_W, rowH);
+      ctx.drawImage(renderToCanvas(group.poses[i], 1, 3), 0, CROP_TOP, CELL_W, rowH, x, top + LABEL + rowH, CELL_W, rowH);
+    });
+    ctx.strokeStyle = '#e2e2e2';
+    ctx.beginPath(); ctx.moveTo(PAD, top + LABEL + rowH + 0.5); ctx.lineTo(canvas.width - PAD, top + LABEL + rowH + 0.5); ctx.stroke();
+  });
+  return canvas.toDataURL('image/png');
+}
+</script>
+</body>
+</html>

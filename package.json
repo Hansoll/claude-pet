@@ -1,0 +1,15 @@
+{
+  "name": "claude-pet",
+  "version": "1.0.0",
+  "description": "Claude Code 세션 진행 상황을 보여 주는 데스크톱 펫 (코덱스 펫 리소스 호환)",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "node launch.js",
+    "demo": "node launch.js --demo",
+    "test": "node --test",
+    "build-pet": "node tools/pet3d/build.js",
+    "hooks:install": "node install-hooks.js",
+    "hooks:uninstall": "node install-hooks.js --uninstall"
+  }
+}

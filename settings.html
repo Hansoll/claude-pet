@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file: data:; style-src 'unsafe-inline'; script-src 'unsafe-inline' file:">
+<title>Claude Pet</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --ink: #2b2622; --sub: #6f6862; --line: rgba(0, 0, 0, 0.12); --soft: rgba(0, 0, 0, 0.05);
+    --accent: #e06a40; --accent-ink: #ffffff; --stage: #efede8; --danger: #c0392b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1f1e1c; --panel: #2a2826; --ink: #f3efea; --sub: #b5ada5; --line: rgba(255, 255, 255, 0.14); --soft: rgba(255, 255, 255, 0.06);
+      --accent: #f08a5d; --accent-ink: #1f1e1c; --stage: #252321; --danger: #ff8a7a;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); user-select: none; -webkit-user-select: none; cursor: default; }
+  body { font-family: "Segoe UI", "Malgun Gothic", -apple-system, "Apple SD Gothic Neo", sans-serif; font-size: 13.5px; line-height: 1.45; }
+  button { font: inherit; color: inherit; }
+  button:focus-visible, input:focus-visible, .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #app { display: grid; grid-template-columns: 286px 1fr; height: 100%; }
+  /* 왼쪽: 펫 목록 */
+  #listPane { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); background: var(--panel); }
+  .pane-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 14px 10px; }
+  .pane-head h2 { margin: 0; font-size: 14px; }
+  .small-button { padding: 4px 10px; border: 1px solid var(--line); border-radius: 8px; background: transparent; cursor: pointer; font-size: 12.5px; }
+  .small-button:hover { background: var(--soft); }
+  #petList { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 10px 10px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-content: start; }
+  #petList::-webkit-scrollbar { width: 8px; }
+  #petList::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+  #petList::-webkit-scrollbar-thumb:hover { background: var(--sub); }
+  .card {
+    position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 6px 8px; border: 1.5px solid var(--line); border-radius: 12px;
+    background: transparent; cursor: pointer; text-align: center; min-width: 0;
+  }
+  .card:hover { background: var(--soft); }
+  .card[aria-selected="true"] { border-color: var(--accent); background: var(--soft); }
+  .thumb { width: 78px; height: 85px; background-repeat: no-repeat; flex: none; display: flex; align-items: center; justify-content: center; }
+  .thumb img { width: 78px; height: 85px; }
+  .thumb-fail { font-size: 11px; color: var(--sub); }
+  .card-name { max-width: 100%; font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tags { display: flex; gap: 4px; min-height: 16px; }
+  /* 카드에서는 꼬리표를 모서리에 얹는다 (왼쪽 위: 사용 중, 오른쪽 위: 3D·코덱스) */
+  .card .tags { position: absolute; top: 6px; left: 6px; right: 6px; z-index: 1; min-height: 0; pointer-events: none; }
+  .card .tags .tag:not(.now):first-child, .card .tags .tag.now + .tag { margin-left: auto; }
+  .tag { padding: 0 6px; border-radius: 8px; font-size: 10.5px; line-height: 16px; background: var(--soft); color: var(--sub); }
+  .tag.now { background: var(--accent); color: var(--accent-ink); }
+  .note { margin: 0; padding: 8px 14px 12px; font-size: 12px; color: var(--sub); }
+  /* 오른쪽: 미리보기와 설정 */
+  #detail { display: flex; flex-direction: column; min-width: 0; padding: 14px 18px 14px; gap: 10px; }
+  #stage { position: relative; height: 226px; border-radius: 14px; background: var(--stage); display: flex; align-items: flex-end; justify-content: center; overflow: hidden; flex: none; }
+  #spriteView { background-repeat: no-repeat; }
+  #threeView { display: block; }
+  #stageFail { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; color: var(--sub); }
+  .title-row { display: flex; align-items: center; gap: 8px; min-height: 24px; }
+  .title-row h1 { margin: 0; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { padding: 3px 11px; border: 1px solid var(--line); border-radius: 13px; background: transparent; cursor: pointer; font-size: 12.5px; }
+  .chip:hover { background: var(--soft); }
+  .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .field { display: grid; grid-template-columns: 44px 1fr; align-items: start; gap: 8px; }
+  .field > .label { font-weight: 600; padding-top: 2px; }
+  .size-row { display: flex; align-items: center; gap: 10px; }
+  .size-row input[type="range"] { flex: 1; accent-color: var(--accent); cursor: pointer; }
+  .size-row output { width: 44px; text-align: right; color: var(--sub); font-variant-numeric: tabular-nums; }
+  .swatch-row { display: flex; align-items: center; gap: 6px; }
+  .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
+  .swatches button { width: 22px; height: 22px; padding: 0; border-radius: 50%; border: 1px solid var(--line); cursor: pointer; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35); }
+  .swatches button[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); }
+  #colorReset { margin-left: auto; }
+  #colorReset[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); font-weight: 600; }
+  .sv { position: relative; height: 62px; margin-top: 8px; border-radius: 8px; cursor: crosshair; touch-action: none; overflow: hidden; border: 1px solid var(--line); }
+  .hue {
+    position: relative; height: 14px; margin-top: 8px; border-radius: 7px; cursor: pointer; touch-action: none; border: 1px solid var(--line);
+    background: linear-gradient(to right, #f00 0%, #ff0 16.67%, #0f0 33.33%, #0ff 50%, #00f 66.67%, #f0f 83.33%, #f00 100%);
+  }
+  .knob { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.3); pointer-events: none; }
+  .hue .knob { top: 50%; }
+  #colorBody[data-disabled="true"] .swatch-row, #colorBody[data-disabled="true"] .sv, #colorBody[data-disabled="true"] .hue { opacity: 0.35; pointer-events: none; }
+  #colorNote { padding: 6px 0 0; }
+  .actions { display: flex; align-items: center; gap: 8px; margin-top: auto; }
+  #message { flex: 1; min-width: 0; font-size: 12.5px; color: var(--sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #message[data-kind="error"] { color: var(--danger); }
+  .button { padding: 7px 16px; border: 1px solid var(--line); border-radius: 9px; background: transparent; cursor: pointer; }
+  .button:hover { background: var(--soft); }
+  .button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+  .button.primary:disabled { opacity: 0.45; cursor: default; }
+  /* 목록 아래: 개수와 언어 고르기 */
+  .pane-foot { display: flex; align-items: center; gap: 8px; padding: 8px 12px 12px; }
+  .pane-foot .note { flex: 1; padding: 0; }
+  .lang { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--sub); }
+  .lang select { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 3px 6px; cursor: pointer; }
+  /* 압축 파일로 펫 추가 카드 */
+  .card.add { border-style: dashed; color: var(--sub); justify-content: center; min-height: 128px; font-size: 12.5px; white-space: pre-line; line-height: 1.35; }
+  .card.add .plus { font-size: 22px; line-height: 1; margin-bottom: 4px; }
+  /* 가져온 펫 지우기 단추 (카드 오른쪽 아래) */
+  .del { position: absolute; right: 4px; bottom: 6px; z-index: 1; width: 20px; height: 20px; padding: 0; border: none; border-radius: 50%; background: transparent; color: var(--sub); font-size: 15px; line-height: 20px; text-align: center; cursor: pointer; }
+  .card.deletable .card-name { padding: 0 16px 0 4px; }   /* 지우기 단추 자리를 비워 둔다 */
+  .del:hover { background: var(--danger); color: #fff; }
+  /* 파일을 끌고 들어왔을 때 덮는 안내 */
+  #dropZone { position: fixed; inset: 10px; display: flex; align-items: center; justify-content: center; border: 3px dashed var(--accent); border-radius: 16px; background: rgba(224, 106, 64, 0.12); color: var(--ink); font-size: 16px; font-weight: 700; pointer-events: none; z-index: 10; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="listPane">
+    <div class="pane-head"><h2 data-i18n="settings.petList"></h2><button type="button" class="small-button" id="refresh" data-i18n="settings.refresh" data-i18n-title="settings.refreshTip"></button></div>
+    <div id="petList" role="listbox"></div>
+    <div class="pane-foot"><p class="note" id="listNote"></p><label class="lang"><span data-i18n="settings.language"></span><select id="langSelect"></select></label></div>
+  </aside>
+  <main id="detail">
+    <div id="stage">
+      <div id="spriteView" hidden></div>
+      <canvas id="threeView" hidden></canvas>
+      <div id="stageFail" hidden></div>
+    </div>
+    <div class="title-row"><h1 id="petName"></h1><span class="tags" id="petTags"></span></div>
+    <div class="field">
+      <span class="label" data-i18n="settings.state"></span>
+      <div class="chips" id="stateChips" role="group"></div>
+    </div>
+    <div class="field">
+      <span class="label" data-i18n="settings.action"></span>
+      <div class="chips" id="actionChips" role="group"></div>
+    </div>
+    <div class="field">
+      <span class="label" data-i18n="settings.size"></span>
+      <div class="size-row"><input type="range" id="sizeRange"><output id="sizeValue"></output></div>
+    </div>
+    <div class="field">
+      <span class="label" data-i18n="settings.color"></span>
+      <div id="colorBody">
+        <div class="swatch-row"><div class="swatches" id="swatches"></div><button type="button" class="small-button" id="colorReset" data-i18n="settings.colorReset" data-i18n-title="settings.colorResetTip"></button></div>
+        <div class="sv" id="colorSv"><div class="knob" id="colorSvKnob"></div></div>
+        <div class="hue" id="colorHue"><div class="knob" id="colorHueKnob"></div></div>
+        <p class="note" id="colorNote" data-i18n="settings.colorOnly3d" hidden></p>
+      </div>
+    </div>
+    <div class="actions">
+      <span id="message" role="status"></span>
+      <button type="button" class="button primary" id="apply"></button>
+      <button type="button" class="button" id="close" data-i18n="settings.close"></button>
+    </div>
+  </main>
+</div>
+<div id="dropZone" hidden><span data-i18n="settings.dropHere"></span></div>
+<script src="i18n.js"></script>
+<script src="pet3d.js"></script>
+<script>
+'use strict';
+(function () {
+  // ── 설정 상수 ─────────────────────────────────────────────
+  const CELL_W = 192;                 // 한 칸 크기 (펫 규격)
+  const CELL_H = 208;
+  const THUMB_W = 78;                 // 목록 카드의 그림 크기 (한 칸을 그대로 줄인 비율)
+  const THUMB_H = 85;
+  const THUMB_3D_DENSITY = 2;         // 3D 펫 카드 그림은 이 배수로 그려 두고 줄여 보인다 (또렷하게 보이도록)
+  const PREVIEW_FPS = 60;             // 3D 미리보기를 초당 그리는 최대 횟수 (주사율이 높은 화면에서 지나치게 그리지 않게)
+  const PREVIEW_FPS_NO_GPU = 30;      // GPU 가속이 꺼진 실행(이미지 펫을 쓰는 중)에서의 최대 횟수. GPU 없이 그리면 CPU를 많이 쓴다
+  const STATES = ['idle', 'working', 'waiting', 'done', 'failed'];
+  const BASE_ANIMATION = { idle: 'idle', working: 'running', waiting: 'waiting', done: 'review', failed: 'failed' };
+  // 상태에 묶이지 않은 동작. 누르면 그 동작만 반복한다 (상태 단추와 합쳐 펫 규격의 동작 9개를 모두 볼 수 있다)
+  const ACTIONS = [
+    { id: 'waving' },
+    { id: 'jumping' },
+    { id: 'running-right' },
+    { id: 'running-left' },
+    { id: 'review' },
+  ];
+  const LOOK_DIRECTIONS = 16;         // 이미지 펫(v2)의 바라보기 방향 수 (위에서 시작해 시계 방향, pets.js와 같다)
+  const LOOK_DEAD_ZONE = 0.45;        // 커서가 이만큼(펫 높이 대비) 가까우면 정면을 본다 (main.js와 같다)
+  const SOURCE_TAGS = { imported: 'settings.tagImported', codex: 'settings.tagCodex' };   // 펫 출처 꼬리표의 문구 열쇠
+  const SUPERSAMPLE = 2;              // 3D 픽셀당 표본 수(한 변)
+  const LOOK_ACTIVE_MS = 3000;        // 마우스가 멈춘 뒤 바라보기를 유지하는 시간
+  const LOOK_CHECK_MS = 250;          // 이미지 펫의 바라보기를 끝낼 때가 됐는지 보는 주기
+  const COLOR_MIN_VALUE = 0.12;       // 고를 수 있는 가장 어두운 밝기 (완전한 검정은 음영이 사라진다)
+  const THUMB_REFRESH_MS = 350;       // 색을 바꾼 뒤 카드 그림을 다시 그리기까지 기다리는 시간
+  const MESSAGE_MS = 5000;            // 안내 문구를 보여 주는 시간
+  const DEFAULT_FRAME_MS = 140;       // 프레임 시간이 비어 있을 때 쓰는 값
+  const MAX_STEP_MS = 100;            // 한 번에 진행하는 최대 시간
+
+  const el = {
+    list: document.getElementById('petList'),
+    listNote: document.getElementById('listNote'),
+    refresh: document.getElementById('refresh'),
+    stage: document.getElementById('stage'),
+    sprite: document.getElementById('spriteView'),
+    canvas: document.getElementById('threeView'),
+    stageFail: document.getElementById('stageFail'),
+    petName: document.getElementById('petName'),
+    petTags: document.getElementById('petTags'),
+    chips: document.getElementById('stateChips'),
+    actionChips: document.getElementById('actionChips'),
+    sizeRange: document.getElementById('sizeRange'),
+    sizeValue: document.getElementById('sizeValue'),
+    colorBody: document.getElementById('colorBody'),
+    swatches: document.getElementById('swatches'),
+    colorReset: document.getElementById('colorReset'),
+    colorSv: document.getElementById('colorSv'),
+    colorSvKnob: document.getElementById('colorSvKnob'),
+    colorHue: document.getElementById('colorHue'),
+    colorHueKnob: document.getElementById('colorHueKnob'),
+    colorNote: document.getElementById('colorNote'),
+    message: document.getElementById('message'),
+    apply: document.getElementById('apply'),
+    close: document.getElementById('close'),
+    langSelect: document.getElementById('langSelect'),
+    dropZone: document.getElementById('dropZone'),
+  };
+  const api = window.petApi;
+
+  // ── 실행 중 상태 ──────────────────────────────────────────
+  let data = { pets: [], currentKey: '', scale: { scale: 0.7, min: 0.25, max: 1.2, step: 0.05 }, color: null, presets: [], lang: 'ko', languages: [], gpu: true, selectKey: '' };
+  let selectedKey = '';              // 미리보기에 띄운 펫
+  let previewState = 'idle';         // 미리보기에서 보여 주는 상태
+  let previewAction = null;          // 동작 단추로 고른 동작 (있으면 상태보다 먼저 보여 준다)
+  let scale = 0.7;                   // 지금 크기 배율
+  let color = { value: null, hue: 30, saturation: 1, brightness: 1 };
+  let colorDragging = null;          // 색상 영역을 끄는 중이면 'sv' | 'hue'
+  let messageTimer = null;
+  let thumbTimer = null;
+  let mouse = { x: 0, y: 0, movedAt: -Infinity };
+  const matcaps = new Map();         // 펫 key → { pixels, size } (3D 펫의 원래 색 지도)
+  const sprite = { timer: null, animations: {}, cell: '', pet: null, looking: false };
+  const three = { renderer: null, actor: null, key: '', ready: false, pixels: null, size: 0, pendingColor: undefined, last: 0, drawn: 0, failed: false };
+
+  // ── 공통 ──────────────────────────────────────────────────
+  function selectedPet() {
+    return data.pets.find((p) => p.key === selectedKey) || null;
+  }
+
+  // 지금 언어의 문구를 꺼낸다 (i18n.js를 못 읽었으면 열쇠를 그대로 보여 준다)
+  function T(key, ...args) {
+    return window.I18N ? window.I18N.t(data.lang || 'ko', key, ...args) : key;
+  }
+
+  function labelOf(state) {
+    return T(`chip.${state}`);
+  }
+
+  // data-i18n이 붙은 고정 문구를 지금 언어로 바꾼다
+  function applyTexts() {
+    document.documentElement.lang = data.lang || 'ko';
+    document.title = T('settings.title');
+    for (const node of document.querySelectorAll('[data-i18n]')) node.textContent = T(node.dataset.i18n);
+    for (const node of document.querySelectorAll('[data-i18n-title]')) node.title = T(node.dataset.i18nTitle);
+    el.list.setAttribute('aria-label', T('settings.petList'));
+    el.sizeRange.setAttribute('aria-label', T('settings.size'));
+    // 언어 고르기
+    el.langSelect.textContent = '';
+    for (const item of data.languages) {
+      const option = document.createElement('option');
+      option.value = item.code;
+      option.textContent = item.name;
+      option.selected = item.code === data.lang;
+      el.langSelect.appendChild(option);
+    }
+  }
+
+  // 아래쪽 안내 문구를 잠깐 보여 준다
+  function showMessage(text, kind) {
+    clearTimeout(messageTimer);
+    el.message.textContent = text || '';
+    el.message.dataset.kind = kind || '';
+    if (text) messageTimer = setTimeout(() => { el.message.textContent = ''; }, MESSAGE_MS);
+  }
+
+  // 그림 주소에서 픽셀을 읽는다 (3D 펫의 색 지도용)
+  function loadPixels(url) {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => {
+        try {
+          const size = image.naturalWidth;
+          if (!size || size !== image.naturalHeight) throw new Error(`색 지도가 정사각형이 아님 (${image.naturalWidth}x${image.naturalHeight})`);
+          const scratch = document.createElement('canvas');
+          scratch.width = size; scratch.height = size;
+          const ctx = scratch.getContext('2d', { willReadFrequently: true });
+          ctx.drawImage(image, 0, 0);
+          resolve({ pixels: ctx.getImageData(0, 0, size, size).data, size });
+        } catch (e) {
+          reject(e);
+        }
+      };
+      image.onerror = () => reject(new Error('색 지도 그림을 읽지 못함'));
+      image.src = url;
+    });
+  }
+
+  // 3D 펫의 색 지도를 한 번만 읽어 기억해 둔다
+  function matcapFor(pet) {
+    if (matcaps.has(pet.key)) return Promise.resolve(matcaps.get(pet.key));
+    return loadPixels(pet.three.matcapUrl).then((loaded) => { matcaps.set(pet.key, loaded); return loaded; });
+  }
+
+  // 색을 입힌 색 지도를 만든다 (hex가 없으면 원래 색)
+  function coloredPixels(base, hex) {
+    const rgb = hex ? PET3D.parseHexColor(hex) : null;
+    return { rgb, pixels: rgb ? PET3D.recolorMatcap(base.pixels, base.size, rgb) : base.pixels };
+  }
+
+  // ── 펫 목록 ───────────────────────────────────────────────
+  // 3D 펫의 대기 자세를 작은 그림으로 그린다 (카드용, 이미지 펫의 첫 칸과 같은 구도). 실패하면 null
+  function render3dThumb(pet, base, hex) {
+    let renderer = null;
+    try {
+      const canvas = document.createElement('canvas');
+      renderer = PET3D.createRenderer(canvas, { preserveDrawingBuffer: true });
+      const tinted = coloredPixels(base, hex);
+      renderer.setMatcap(tinted.pixels, base.size);
+      renderer.setEyeColors(PET3D.eyeColorsFor(tinted.rgb));
+      const model = PET3D.prepareModel(pet.three.model);
+      const pose = Object.assign({}, model.base, model.clips.idle.frames[0].pose, { laptop: 0 });
+      renderer.draw(pose, model.shape, 1, SUPERSAMPLE + 1);
+      const out = document.createElement('canvas');
+      out.width = THUMB_W * THUMB_3D_DENSITY; out.height = THUMB_H * THUMB_3D_DENSITY;
+      const ctx = out.getContext('2d');
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(canvas, 0, 0, canvas.width, canvas.height, 0, 0, out.width, out.height);
+      return out.toDataURL('image/png');
+    } catch (e) {
+      console.warn(`3D 펫 카드 그림 만들기 실패 (${pet.key}): ${e.message}`);
+      return null;
+    } finally {
+      try {
+        const lose = renderer && renderer.gl.getExtension('WEBGL_lose_context');
+        if (lose) lose.loseContext();
+      } catch (_) { /* 이미 정리됨 */ }
+    }
+  }
+
+  // 카드 안의 그림을 채운다
+  function fillThumb(pet, holder) {
+    holder.textContent = '';
+    holder.style.backgroundImage = 'none';
+    const fail = (text) => {
+      const note = document.createElement('span');
+      note.className = 'thumb-fail';
+      note.textContent = text;
+      holder.appendChild(note);
+    };
+    if (pet.error) { fail(T('settings.cannotLoad')); return; }
+    if (pet.type === '3d') {
+      matcapFor(pet).then((base) => {
+        const url = render3dThumb(pet, base, color.value);
+        if (!url) { fail(T('settings.cannotDraw')); return; }
+        const image = document.createElement('img');
+        image.alt = '';
+        image.src = url;
+        holder.textContent = '';
+        holder.appendChild(image);
+      }).catch((e) => { console.warn(`색 지도 읽기 실패 (${pet.key}): ${e.message}`); fail(T('settings.cannotLoad')); });
+      return;
+    }
+    // 이미지 펫: 시트의 첫 칸을 카드 크기로 줄여 보여 준다
+    const probe = new Image();
+    probe.onload = () => {
+      holder.style.backgroundImage = `url("${pet.sprite.sheetUrl}")`;
+      holder.style.backgroundSize = `${THUMB_W * pet.sprite.cols}px ${THUMB_H * pet.sprite.rows}px`;
+      holder.style.backgroundPosition = '0 0';
+    };
+    probe.onerror = () => fail(T('settings.cannotLoad'));
+    probe.src = pet.sprite.sheetUrl;
+  }
+
+  // 목록을 다시 그린다
+  function renderList() {
+    el.list.textContent = '';
+    for (const pet of data.pets) {
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'card';
+      card.dataset.key = pet.key;
+      card.dataset.type = pet.type;
+      card.dataset.error = String(!!pet.error);
+      card.dataset.current = String(pet.key === data.currentKey);
+      card.setAttribute('role', 'option');
+      card.setAttribute('aria-selected', String(pet.key === selectedKey));
+      const thumb = document.createElement('div');
+      thumb.className = 'thumb';
+      fillThumb(pet, thumb);
+      const name = document.createElement('div');
+      name.className = 'card-name';
+      name.textContent = pet.name;
+      name.title = pet.name;
+      const tags = document.createElement('div');
+      tags.className = 'tags';
+      for (const tag of tagsOf(pet)) tags.appendChild(tag);
+      card.append(thumb, name, tags);
+      // 압축 파일로 가져온 펫은 지울 수 있다 (본체가 한 번 더 묻는다)
+      if (pet.deletable) {
+        const del = document.createElement('span');
+        del.className = 'del';
+        del.setAttribute('role', 'button');
+        del.dataset.deleteKey = pet.key;
+        del.textContent = '×';
+        del.title = T('settings.delete');
+        card.appendChild(del);
+        card.classList.add('deletable');
+      }
+      el.list.appendChild(card);
+    }
+    // 마지막 칸: 압축 파일에서 펫 추가
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'card add';
+    add.id = 'addPet';
+    add.title = T('settings.addTip');
+    const plus = document.createElement('span');
+    plus.className = 'plus';
+    plus.textContent = '+';
+    const label = document.createElement('span');
+    label.textContent = T('settings.add');
+    add.append(plus, label);
+    el.list.appendChild(add);
+    const broken = data.pets.filter((p) => p.error).length;
+    const usable = data.pets.length - broken;
+    if (!data.pets.length) el.listNote.textContent = T('settings.empty');
+    else el.listNote.textContent = T('settings.countAll', usable) + (broken ? T('settings.countBroken', broken) : '');
+  }
+
+  // 펫에 붙일 꼬리표를 만든다 (사용 중, 3D, 코덱스)
+  function tagsOf(pet) {
+    const list = [];
+    const add = (text, extra) => {
+      const tag = document.createElement('span');
+      tag.className = `tag${extra ? ` ${extra}` : ''}`;
+      tag.textContent = text;
+      list.push(tag);
+    };
+    if (pet.key === data.currentKey) add(T('settings.tagCurrent'), 'now');
+    if (pet.type === '3d') add('3D');
+    if (SOURCE_TAGS[pet.source]) add(T(SOURCE_TAGS[pet.source]));
+    return list;
+  }
+
+  // 선택 표시와 단추 상태를 맞춘다
+  function renderSelection() {
+    for (const card of el.list.children) if (card.dataset.key) card.setAttribute('aria-selected', String(card.dataset.key === selectedKey));
+    const pet = selectedPet();
+    el.petName.textContent = pet ? pet.name : '';
+    el.petTags.textContent = '';
+    if (pet) for (const tag of tagsOf(pet)) el.petTags.appendChild(tag);
+    const same = !pet || pet.key === data.currentKey;
+    el.apply.disabled = same || !!(pet && pet.error);
+    el.apply.textContent = pet && pet.key === data.currentKey ? T('settings.current') : T('settings.apply');
+    const colorable = !!pet && pet.type === '3d' && !pet.error;
+    el.colorBody.dataset.disabled = String(!colorable);
+    el.colorNote.hidden = colorable;
+  }
+
+  // ── 미리보기: 이미지 펫 ───────────────────────────────────
+  function stopSprite() {
+    clearTimeout(sprite.timer);
+    sprite.timer = null;
+  }
+
+  // 시트의 한 칸을 보여 준다
+  function showSpriteCell(row, col) {
+    el.sprite.style.backgroundPosition = `${-col * CELL_W * scale}px ${-row * CELL_H * scale}px`;
+    sprite.cell = `${row},${col}`;
+  }
+
+  // 애니메이션 하나를 재생한다. loop가 아니면 끝나고 onEnd를 부른다
+  function playSprite(id, loop, onEnd) {
+    stopSprite();
+    const anim = sprite.animations[id];
+    if (!anim) { if (onEnd) onEnd(); return; }
+    let index = 0;
+    const step = () => {
+      showSpriteCell(anim.row, index);
+      sprite.timer = setTimeout(() => {
+        index++;
+        if (index >= anim.frames) {
+          if (!loop) { sprite.timer = null; if (onEnd) onEnd(); return; }
+          index = 0;
+        }
+        step();
+      }, anim.durations[index] || DEFAULT_FRAME_MS);
+    };
+    step();
+  }
+
+  // 미리보기 상태에 맞는 동작을 튼다 (완료는 한 번 뛴 뒤 둘러보기, 동작 단추를 골랐으면 그 동작만 반복)
+  function startSpriteState() {
+    sprite.looking = false;
+    if (previewAction) playSprite(previewAction, true, null);
+    else if (previewState === 'done') playSprite('jumping', false, () => playSprite('review', true, null));
+    else playSprite(BASE_ANIMATION[previewState] || 'idle', true, null);
+  }
+
+  // 이미지 펫(v2)이 대기 상태일 때 창 안의 커서 쪽을 바라보는 칸을 보여 준다. 바라보기를 했으면 true
+  function lookSprite() {
+    const pet = sprite.pet;
+    if (!pet || el.sprite.hidden || previewAction || previewState !== 'idle') return false;
+    const info = pet.sprite;
+    if (info.version !== 2 || !info.neutralLook || !Number.isFinite(info.lookFirstRow)) return false;
+    const rect = el.sprite.getBoundingClientRect();
+    const dx = mouse.x - (rect.left + rect.width / 2);
+    const dy = mouse.y - (rect.top + rect.height / 2);
+    stopSprite();
+    sprite.looking = true;
+    if (Math.hypot(dx, dy) < rect.height * LOOK_DEAD_ZONE) { showSpriteCell(info.neutralLook.row, info.neutralLook.frame); return true; }
+    const step = 360 / LOOK_DIRECTIONS;
+    const degrees = (Math.atan2(dx, -dy) * 180) / Math.PI;      // 위=0도, 시계 방향
+    const index = ((Math.round(degrees / step) % LOOK_DIRECTIONS) + LOOK_DIRECTIONS) % LOOK_DIRECTIONS;
+    showSpriteCell(info.lookFirstRow + Math.floor(index / info.cols), index % info.cols);
+    return true;
+  }
+
+  // 마우스가 멈춘 지 오래되면 바라보기를 끝내고 대기 동작으로 돌아간다
+  function endSpriteLook() {
+    if (sprite.looking && performance.now() - mouse.movedAt >= LOOK_ACTIVE_MS) startSpriteState();
+  }
+
+  // 이미지 펫의 크기를 지금 배율에 맞춘다
+  function layoutSprite() {
+    const pet = sprite.pet;
+    if (!pet) return;
+    el.sprite.style.width = `${CELL_W * scale}px`;
+    el.sprite.style.height = `${CELL_H * scale}px`;
+    el.sprite.style.backgroundSize = `${CELL_W * scale * pet.sprite.cols}px ${CELL_H * scale * pet.sprite.rows}px`;
+  }
+
+  // 이미지 펫을 미리보기에 올린다
+  function loadSpritePreview(pet) {
+    sprite.pet = pet;
+    sprite.animations = {};
+    for (const a of pet.sprite.animations || []) sprite.animations[a.id] = a;
+    const key = pet.key;
+    const probe = new Image();
+    probe.onload = () => {
+      if (selectedKey !== key) return;
+      el.sprite.style.backgroundImage = `url("${pet.sprite.sheetUrl}")`;
+      layoutSprite();
+      el.sprite.hidden = false;
+      startSpriteState();
+    };
+    probe.onerror = () => { if (selectedKey === key) failPreview(T('settings.fail.sheet')); };
+    probe.src = pet.sprite.sheetUrl;
+  }
+
+  // ── 미리보기: 3D 펫 ───────────────────────────────────────
+  // 지금 색을 미리보기에 입힌다
+  function applyPreviewColor(hex) {
+    const base = matcaps.get(three.key);
+    if (!base || !three.renderer) return;
+    const tinted = coloredPixels(base, hex);
+    three.renderer.setMatcap(tinted.pixels, base.size);
+    three.renderer.setEyeColors(PET3D.eyeColorsFor(tinted.rgb));
+  }
+
+  // 미리보기 상태를 3D 동작 재생기에 알린다
+  function startThreeState() {
+    if (!three.ready) return;
+    if (previewAction) { three.actor.setBase(previewAction); return; }
+    three.actor.setBase(BASE_ANIMATION[previewState] || 'idle');
+    if (previewState === 'done') three.actor.playOnce('jumping');
+  }
+
+  // 3D 펫의 화면 크기를 지금 배율에 맞춘다
+  function layoutThree() {
+    el.canvas.style.width = `${CELL_W * scale}px`;
+    el.canvas.style.height = `${CELL_H * scale}px`;
+  }
+
+  // 3D 펫을 미리보기에 올린다
+  function loadThreePreview(pet) {
+    three.key = pet.key;
+    three.ready = false;
+    try {
+      if (!window.PET3D) throw new Error('3D 그리기 파일(pet3d.js)을 불러오지 못함');
+      if (!three.renderer) three.renderer = PET3D.createRenderer(el.canvas);
+      three.actor = PET3D.createActor(pet.three.model);
+    } catch (e) {
+      three.failed = true;
+      failPreview(T('settings.fail.preview3d', e.message));
+      return;
+    }
+    matcapFor(pet).then(() => {
+      if (selectedKey !== pet.key) return;
+      applyPreviewColor(color.value);
+      layoutThree();
+      three.ready = true;
+      three.last = 0;
+      el.canvas.hidden = false;
+      startThreeState();
+    }).catch((e) => { if (selectedKey === pet.key) failPreview(T('settings.fail.data3d', e.message)); });
+  }
+
+  // 3D 미리보기의 한 프레임
+  function frame(now) {
+    requestAnimationFrame(frame);
+    if (!three.ready || el.canvas.hidden) return;
+    if (three.last && now - three.last < 1000 / (data.gpu ? PREVIEW_FPS : PREVIEW_FPS_NO_GPU) - 2) return;     // 아직 그릴 때가 아니다
+    const dt = three.last ? Math.min(MAX_STEP_MS, now - three.last) : 0;
+    three.last = now;
+    try {
+      if (three.pendingColor !== undefined) {
+        const wanted = three.pendingColor;
+        three.pendingColor = undefined;
+        applyPreviewColor(wanted);
+      }
+      // 대기 상태에서는 창 안의 마우스를 눈으로 따라간다
+      const rect = el.canvas.getBoundingClientRect();
+      const looking = !previewAction && previewState === 'idle' && now - mouse.movedAt < LOOK_ACTIVE_MS;
+      three.actor.setLook({ active: looking, dx: mouse.x - (rect.left + rect.width / 2), dy: mouse.y - (rect.top + rect.height * 0.57) });
+      const pose = three.actor.update(dt);
+      three.renderer.draw(pose, three.actor.model.shape, scale * (window.devicePixelRatio || 1), SUPERSAMPLE);
+      three.drawn++;
+    } catch (e) {
+      three.ready = false;
+      failPreview(T('settings.fail.drawing', e.message));
+    }
+  }
+
+  // ── 미리보기 공통 ─────────────────────────────────────────
+  // 미리보기 자리에 사유를 보여 준다 (목록과 크기 설정은 계속 쓸 수 있다)
+  function failPreview(text) {
+    stopSprite();
+    three.ready = false;
+    el.sprite.hidden = true;
+    el.canvas.hidden = true;
+    el.stageFail.hidden = false;
+    el.stageFail.textContent = text;
+  }
+
+  // 고른 펫을 미리보기에 올린다
+  function loadPreview() {
+    stopSprite();
+    three.ready = false;
+    el.sprite.hidden = true;
+    el.canvas.hidden = true;
+    el.stageFail.hidden = true;
+    sprite.pet = null;
+    const pet = selectedPet();
+    if (!pet) { failPreview(T('settings.fail.none')); return; }
+    if (pet.error) { failPreview(T('settings.fail.pet', pet.error)); return; }
+    if (pet.type === '3d') loadThreePreview(pet);
+    else loadSpritePreview(pet);
+  }
+
+  // 단추의 눌림 표시를 지금 미리보기에 맞춘다 (동작을 골랐으면 상태 단추는 모두 풀린다)
+  function renderChips() {
+    for (const chip of el.chips.children) chip.setAttribute('aria-pressed', String(!previewAction && chip.dataset.state === previewState));
+    for (const chip of el.actionChips.children) chip.setAttribute('aria-pressed', String(chip.dataset.action === previewAction));
+  }
+
+  // 미리보기 상태나 동작을 바꾼다. kind는 'state' | 'action'
+  function setPreview(kind, next) {
+    if (kind === 'state') {
+      if (!STATES.includes(next)) return;
+      previewState = next;
+      previewAction = null;
+    } else {
+      if (!ACTIONS.some((a) => a.id === next)) return;
+      previewAction = next;
+    }
+    renderChips();
+    const pet = selectedPet();
+    if (!pet || pet.error) return;
+    if (pet.type === '3d') startThreeState();
+    else if (!el.sprite.hidden) startSpriteState();
+  }
+
+  // 펫을 고른다 (미리보기만 바뀌고, 실제 펫은 "이 펫으로 바꾸기"를 눌러야 바뀐다)
+  function selectPet(key) {
+    if (!data.pets.some((p) => p.key === key)) return;
+    selectedKey = key;
+    renderSelection();
+    const chosen = el.list.querySelector('.card[aria-selected="true"]');
+    if (chosen) chosen.scrollIntoView({ block: 'nearest' });       // 반쯤 가려진 카드를 눌렀으면 다 보이게 굴린다
+    loadPreview();
+  }
+
+  // ── 크기 ──────────────────────────────────────────────────
+  function renderSize() {
+    el.sizeRange.min = String(data.scale.min);
+    el.sizeRange.max = String(data.scale.max);
+    el.sizeRange.step = String(data.scale.step);
+    el.sizeRange.value = String(scale);
+    el.sizeValue.textContent = `${Math.round(scale * 100)}%`;
+  }
+
+  // 슬라이더 값을 크기로 적용한다 (미리보기와 실제 펫에 바로 반영)
+  function onSizeInput() {
+    const value = Number(el.sizeRange.value);
+    if (!Number.isFinite(value)) return;
+    scale = Math.min(Math.max(value, data.scale.min), data.scale.max);
+    el.sizeValue.textContent = `${Math.round(scale * 100)}%`;
+    layoutSprite();
+    layoutThree();
+    if (sprite.pet && sprite.cell) { const [row, col] = sprite.cell.split(',').map(Number); showSpriteCell(row, col); }
+    if (api) api.setScale(scale);
+  }
+
+  // ── 색상 ──────────────────────────────────────────────────
+  // 색상 영역의 표시를 현재 값에 맞춘다
+  function renderColor() {
+    const pure = PET3D.toHexColor(PET3D.rgbFromHsv(color.hue, 1, 1));
+    el.colorSv.style.background = `linear-gradient(to top, #000, rgba(0, 0, 0, 0)), linear-gradient(to right, #fff, ${pure})`;
+    el.colorSvKnob.style.left = `${color.saturation * 100}%`;
+    el.colorSvKnob.style.top = `${(1 - color.brightness) * 100}%`;
+    el.colorSvKnob.style.background = color.value || 'transparent';
+    el.colorHueKnob.style.left = `${(color.hue / 360) * 100}%`;
+    el.colorHueKnob.style.background = pure;
+    el.colorReset.setAttribute('aria-pressed', String(!color.value));
+    for (const button of el.swatches.children) button.setAttribute('aria-pressed', String(!!color.value && button.dataset.hex === color.value));
+  }
+
+  // 준비된 색 단추를 만든다 (이름은 글자로만 넣는다)
+  function buildSwatches() {
+    el.swatches.textContent = '';
+    for (const preset of data.presets) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.hex = preset.hex;
+      button.title = T(`color.${preset.id}`);
+      button.setAttribute('aria-label', button.title);
+      button.style.background = preset.hex;
+      el.swatches.appendChild(button);
+    }
+  }
+
+  // 색 하나를 색상·선명함·밝기로 풀어 손잡이 위치에 반영한다
+  function setPickerFrom(rgb) {
+    const hsv = PET3D.hsvFromRgb(rgb);
+    if (hsv.s > 0.01 && hsv.v > 0.01) color.hue = hsv.h;      // 색상이 없는 색(흰색·회색)은 띠 위치를 그대로 둔다
+    color.saturation = hsv.s;
+    color.brightness = Math.max(COLOR_MIN_VALUE, hsv.v);
+  }
+
+  // 색을 고른다: 미리보기와 실제 펫에 바로 반영하고 저장을 맡긴다 (null이면 원래 색)
+  function pickColor(hex) {
+    const pet = selectedPet();
+    if (!pet || pet.type !== '3d') return;
+    color.value = hex;
+    three.pendingColor = hex;          // 실제 계산은 다음 그릴 때 한 번만 한다
+    renderColor();
+    if (api) api.setColor(hex);
+    // 카드 그림은 끄는 것이 멈춘 뒤에 한 번만 다시 그린다
+    clearTimeout(thumbTimer);
+    thumbTimer = setTimeout(() => {
+      for (const card of el.list.children) {
+        const item = data.pets.find((p) => p.key === card.dataset.key);
+        if (item && item.type === '3d' && !item.error) fillThumb(item, card.querySelector('.thumb'));
+      }
+    }, THUMB_REFRESH_MS);
+  }
+
+  // 사각형 위의 위치를 선명함·밝기로 바꿔 적용한다
+  function colorFromSv(clientX, clientY) {
+    const rect = el.colorSv.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    color.saturation = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1);
+    color.brightness = Math.min(Math.max(1 - (clientY - rect.top) / rect.height, COLOR_MIN_VALUE), 1);
+    pickColor(PET3D.toHexColor(PET3D.rgbFromHsv(color.hue, color.saturation, color.brightness)));
+  }
+
+  // 띠 위의 위치를 색상으로 바꿔 적용한다
+  function colorFromHue(clientX) {
+    const rect = el.colorHue.getBoundingClientRect();
+    if (!rect.width) return;
+    color.hue = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1) * 360;
+    // 선명함이 거의 없으면 색상을 돌려도 차이가 없으니 조금 올려 준다
+    if (color.saturation < 0.15) color.saturation = 0.6;
+    pickColor(PET3D.toHexColor(PET3D.rgbFromHsv(color.hue, color.saturation, color.brightness)));
+  }
+
+  // 원래 색의 대표색을 구한다 (손잡이를 놓을 자리를 정하려고). 아직 못 읽었으면 주황
+  function baseColorOf(pet) {
+    const base = pet && matcaps.get(pet.key);
+    return base ? PET3D.matcapBaseColor(base.pixels, base.size) : [238, 109, 21];
+  }
+
+  // ── 본체가 보낸 자료 반영 ─────────────────────────────────
+  // 본체가 보낸 값을 믿기 전에 모양을 확인하고 다듬는다
+  function tidyData(next) {
+    const out = { pets: [], currentKey: '', scale: data.scale, color: null, presets: [], lang: data.lang, languages: data.languages, gpu: true, selectKey: '' };
+    if (!next || typeof next !== 'object') return out;
+    out.gpu = next.gpu !== false;
+    if (typeof next.lang === 'string' && /^[a-z]{2}$/.test(next.lang)) out.lang = next.lang;
+    if (Array.isArray(next.languages)) out.languages = next.languages.filter((l) => l && typeof l.code === 'string' && typeof l.name === 'string');
+    out.selectKey = typeof next.selectKey === 'string' ? next.selectKey : '';
+    for (const pet of Array.isArray(next.pets) ? next.pets : []) {
+      if (!pet || typeof pet.key !== 'string' || !pet.key) continue;
+      const item = { key: pet.key, name: typeof pet.name === 'string' && pet.name ? pet.name : pet.key, source: String(pet.source || ''), type: pet.type === '3d' ? '3d' : 'sprite', error: typeof pet.error === 'string' ? pet.error : '', deletable: pet.deletable === true };
+      if (item.type === '3d') {
+        if (pet.three && pet.three.model && typeof pet.three.matcapUrl === 'string') item.three = pet.three;
+        else if (!item.error) item.error = T('settings.fail.empty3d');
+      } else if (pet.sprite && typeof pet.sprite.sheetUrl === 'string' && pet.sprite.cols > 0 && pet.sprite.rows > 0) {
+        item.sprite = pet.sprite;
+      } else if (!item.error) {
+        item.error = T('settings.fail.emptySheet');
+      }
+      out.pets.push(item);
+    }
+    out.currentKey = typeof next.currentKey === 'string' ? next.currentKey : '';
+    const s = next.scale;
+    if (s && [s.scale, s.min, s.max, s.step].every(Number.isFinite) && s.max > s.min && s.step > 0) out.scale = { scale: s.scale, min: s.min, max: s.max, step: s.step };
+    const rgb = PET3D.parseHexColor(next.color);
+    out.color = rgb ? PET3D.toHexColor(rgb) : null;
+    out.presets = (Array.isArray(next.presets) ? next.presets : [])
+      .filter((p) => p && typeof p.id === 'string' && PET3D.parseHexColor(p.hex))
+      .map((p) => ({ id: p.id, hex: PET3D.toHexColor(PET3D.parseHexColor(p.hex)) }));
+    return out;
+  }
+
+  // 본체가 보낸 펫 목록과 설정을 화면에 반영한다
+  function applyData(next) {
+    data = tidyData(next);
+    scale = data.scale.scale;
+    color.value = data.color;
+    applyTexts();
+    buildChips();
+    if (data.selectKey && data.pets.some((p) => p.key === data.selectKey)) selectedKey = data.selectKey;     // 방금 가져온 펫을 골라 둔다
+    if (!data.pets.some((p) => p.key === selectedKey)) selectedKey = data.pets.some((p) => p.key === data.currentKey) ? data.currentKey : (data.pets[0] ? data.pets[0].key : '');
+    renderList();
+    renderSize();
+    buildSwatches();
+    const pet = selectedPet();
+    setPickerFrom(PET3D.parseHexColor(color.value) || baseColorOf(pet));
+    renderColor();
+    renderSelection();
+    // 고른 펫의 카드가 목록 아래쪽에 숨어 있으면 보이는 자리로 굴린다
+    const chosen = el.list.querySelector('.card[aria-selected="true"]');
+    if (chosen) chosen.scrollIntoView({ block: 'nearest' });
+    loadPreview();
+    // 색 지도를 읽고 나면 손잡이를 원래 색 자리에 다시 놓는다
+    if (pet && pet.type === '3d' && !pet.error && !color.value) {
+      matcapFor(pet).then(() => { if (!color.value && selectedKey === pet.key) { setPickerFrom(baseColorOf(pet)); renderColor(); } }).catch(() => { /* 미리보기 쪽에서 알린다 */ });
+    }
+  }
+
+  // ── 조작 연결 ─────────────────────────────────────────────
+  function buildChips() {
+    el.chips.textContent = '';
+    for (const state of STATES) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chip';
+      chip.dataset.state = state;
+      chip.textContent = labelOf(state);
+      el.chips.appendChild(chip);
+    }
+    el.actionChips.textContent = '';
+    for (const action of ACTIONS) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chip';
+      chip.dataset.action = action.id;
+      chip.textContent = T(`action.${action.id}`);
+      el.actionChips.appendChild(chip);
+    }
+    renderChips();
+  }
+
+  function bindEvents() {
+    window.addEventListener('mousemove', (e) => {
+      mouse = { x: e.clientX, y: e.clientY, movedAt: performance.now() };
+      lookSprite();
+    });
+    setInterval(endSpriteLook, LOOK_CHECK_MS);
+    window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && api) api.closeSettings(); });
+    el.list.addEventListener('click', (e) => {
+      const del = e.target && e.target.closest ? e.target.closest('.del') : null;
+      if (del) { e.stopPropagation(); if (api) api.deletePet(del.dataset.deleteKey); return; }
+      const card = e.target && e.target.closest ? e.target.closest('.card') : null;
+      if (card && card.id === 'addPet') { if (api) api.pickImport(); return; }
+      if (card) selectPet(card.dataset.key);
+    });
+    el.langSelect.addEventListener('change', () => { if (api) api.setLanguage(el.langSelect.value); });
+    // 압축 파일을 창에 끌어다 놓으면 가져온다 (파일이 아닌 것은 무시하고, 창이 그 파일을 열지 않게 막는다)
+    let dragDepth = 0;
+    const hasFiles = (e) => !!(e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files'));
+    window.addEventListener('dragenter', (e) => { if (!hasFiles(e)) return; e.preventDefault(); dragDepth++; el.dropZone.hidden = false; });
+    window.addEventListener('dragover', (e) => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+    window.addEventListener('dragleave', (e) => { if (!hasFiles(e)) return; dragDepth = Math.max(0, dragDepth - 1); if (!dragDepth) el.dropZone.hidden = true; });
+    window.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dragDepth = 0;
+      el.dropZone.hidden = true;
+      if (!api || !e.dataTransfer || !e.dataTransfer.files.length) return;
+      if (api.importFiles(e.dataTransfer.files) > 0) showMessage(T('settings.importing'));
+    });
+    el.chips.addEventListener('click', (e) => {
+      const chip = e.target && e.target.closest ? e.target.closest('.chip') : null;
+      if (chip) setPreview('state', chip.dataset.state);
+    });
+    el.actionChips.addEventListener('click', (e) => {
+      const chip = e.target && e.target.closest ? e.target.closest('.chip') : null;
+      if (chip) setPreview('action', chip.dataset.action);
+    });
+    el.sizeRange.addEventListener('input', onSizeInput);
+    el.refresh.addEventListener('click', () => { if (api) { showMessage(T('settings.refreshing')); api.refreshPets(); } });
+    el.apply.addEventListener('click', () => {
+      const pet = selectedPet();
+      if (!api || !pet || pet.error || pet.key === data.currentKey) return;
+      showMessage(T('settings.applying'));
+      api.applyPet(pet.key);
+    });
+    el.close.addEventListener('click', () => { if (api) api.closeSettings(); else window.close(); });
+    el.colorReset.addEventListener('click', () => {
+      const pet = selectedPet();
+      if (!pet || pet.type !== '3d') return;
+      setPickerFrom(baseColorOf(pet));
+      pickColor(null);
+    });
+    el.swatches.addEventListener('click', (e) => {
+      const button = e.target && e.target.closest ? e.target.closest('button') : null;
+      const rgb = button ? PET3D.parseHexColor(button.dataset.hex) : null;
+      if (!rgb) return;
+      setPickerFrom(rgb);
+      pickColor(PET3D.toHexColor(rgb));
+    });
+    const bindColorDrag = (element, name, apply) => {
+      element.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) return;
+        try { element.setPointerCapture(e.pointerId); } catch (_) { /* 캡처 실패해도 누른 자리로는 바뀐다 */ }
+        colorDragging = name;
+        apply(e);
+      });
+      element.addEventListener('pointermove', (e) => { if (colorDragging === name) apply(e); });
+      const end = () => { if (colorDragging === name) colorDragging = null; };
+      element.addEventListener('pointerup', end);
+      element.addEventListener('pointercancel', end);
+    };
+    bindColorDrag(el.colorSv, 'sv', (e) => colorFromSv(e.clientX, e.clientY));
+    bindColorDrag(el.colorHue, 'hue', (e) => colorFromHue(e.clientX));
+    el.canvas.addEventListener('webglcontextlost', (event) => {
+      event.preventDefault();
+      three.renderer = null;
+      failPreview(T('settings.fail.gpuLost'));
+    });
+  }
+
+  // 점검용: 창의 현재 상태를 돌려준다
+  window.settingsDebug = function () {
+    const pet = selectedPet();
+    return {
+      pets: data.pets.length, cards: el.list.children.length, delButtons: Array.from(el.list.querySelectorAll('.del')).map((d) => { const r = d.getBoundingClientRect(); return [Math.round(r.x), Math.round(r.y), Math.round(r.width), getComputedStyle(d).color]; }), lang: data.lang, selected: selectedKey, current: data.currentKey,
+      type: pet ? pet.type : null, state: previewState, action: previewAction, actionChips: el.actionChips.children.length, spriteLooking: sprite.looking, scale, color: color.value || 'original',
+      applyEnabled: !el.apply.disabled, applyText: el.apply.textContent, colorEnabled: el.colorBody.dataset.disabled !== 'true',
+      spriteShown: !el.sprite.hidden, spriteCell: sprite.cell, threeShown: !el.canvas.hidden, clip: three.ready ? three.actor.clipName() : null,
+      drawn: three.drawn, canvas: [el.canvas.width, el.canvas.height], fail: el.stageFail.hidden ? '' : el.stageFail.textContent, message: el.message.textContent,
+    };
+  };
+
+  // ── 진입점 ────────────────────────────────────────────────
+  buildChips();
+  bindEvents();
+  requestAnimationFrame(frame);
+  if (!api) {
+    failPreview(T('settings.fail.noApi'));
+    return;
+  }
+  api.onSettingsData(applyData);
+  api.onSettingsResult((result) => {
+    if (!result || typeof result !== 'object') return;
+    showMessage(typeof result.message === 'string' ? result.message : '', result.ok === false ? 'error' : '');
+  });
+  api.settingsReady();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src file: data:; style-src 'unsafe-inline'; script-src 'unsafe-inline' file:">
+<title>Claude Pet</title>
+<style>
+  :root {
+    --bg: #f6f5f2; --panel: #ffffff; --ink: #2b2622; --sub: #6f6862; --line: rgba(0, 0, 0, 0.12);
+    --accent: #e06a40; --accent-ink: #ffffff; --ok: #1f7a52; --warn: #b7791f; --bad: #c0392b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1f1e1c; --panel: #2a2826; --ink: #f3efea; --sub: #b5ada5; --line: rgba(255, 255, 255, 0.14);
+      --accent: #f08a5d; --accent-ink: #1f1e1c; --ok: #5fc995; --warn: #e5b45a; --bad: #ff8a7a;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--ink); user-select: none; -webkit-user-select: none; cursor: default; }
+  body { font-family: "Segoe UI", "Malgun Gothic", -apple-system, "Apple SD Gothic Neo", sans-serif; font-size: 13.5px; line-height: 1.5; display: flex; flex-direction: column; padding: 20px 22px 18px; gap: 12px; }
+  h1 { margin: 0; font-size: 18px; }
+  .lead { margin: 0; color: var(--sub); }
+  .rows { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .row { display: grid; grid-template-columns: 22px 1fr; gap: 2px 8px; padding: 10px 12px; }
+  .row + .row { border-top: 1px solid var(--line); }
+  .mark { grid-row: span 2; font-weight: 800; font-size: 15px; text-align: center; }
+  .mark[data-kind="ok"] { color: var(--ok); }
+  .mark[data-kind="warn"] { color: var(--warn); }
+  .mark[data-kind="bad"] { color: var(--bad); }
+  .row b { font-weight: 650; }
+  .row small { color: var(--sub); font-size: 12px; }
+  .reads { margin: 0; font-size: 12px; color: var(--sub); }
+  .foot { display: flex; align-items: center; gap: 8px; margin-top: auto; }
+  .lang { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--sub); margin-right: auto; }
+  select { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 3px 6px; cursor: pointer; }
+  button { font: inherit; color: inherit; padding: 7px 16px; border: 1px solid var(--line); border-radius: 9px; background: transparent; cursor: pointer; }
+  button:hover { background: rgba(127, 127, 127, 0.1); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
+  button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+  <h1 data-i18n="welcome.title"></h1>
+  <p class="lead" data-i18n="welcome.lead"></p>
+  <div class="rows">
+    <div class="row"><span class="mark" id="codeMark"></span><b data-i18n="welcome.code"></b><small id="codeText"></small></div>
+    <div class="row"><span class="mark" id="appMark"></span><b data-i18n="welcome.app"></b><small id="appText"></small></div>
+    <div class="row"><span class="mark" id="hookMark"></span><b data-i18n="welcome.hooks"></b><small id="hookText"></small></div>
+  </div>
+  <p class="reads" data-i18n="welcome.reads"></p>
+  <div class="foot">
+    <label class="lang"><span data-i18n="welcome.language"></span><select id="langSelect"></select></label>
+    <button type="button" id="recheck" data-i18n="welcome.recheck"></button>
+    <button type="button" class="primary" id="start" data-i18n="welcome.start"></button>
+  </div>
+<script src="i18n.js"></script>
+<script>
+'use strict';
+(function () {
+  // ── 설정 상수 ─────────────────────────────────────────────
+  const MARKS = { ok: '✓', warn: '!', bad: '✗' };
+
+  const el = {
+    codeMark: document.getElementById('codeMark'),
+    codeText: document.getElementById('codeText'),
+    appMark: document.getElementById('appMark'),
+    appText: document.getElementById('appText'),
+    hookMark: document.getElementById('hookMark'),
+    hookText: document.getElementById('hookText'),
+    langSelect: document.getElementById('langSelect'),
+    recheck: document.getElementById('recheck'),
+    start: document.getElementById('start'),
+  };
+  const api = window.petApi;
+  let data = { lang: 'ko', languages: [], found: { transcripts: false, sessionFiles: 0, app: false, accounts: 0 }, hooks: { status: 'off', error: '' } };
+
+  // 지금 언어의 문구를 꺼낸다
+  function T(key, ...args) {
+    return window.I18N ? window.I18N.t(data.lang, key, ...args) : key;
+  }
+
+  // 한 줄의 표시(✓ ! ✗)와 설명을 채운다
+  function setRow(mark, textNode, kind, text) {
+    mark.dataset.kind = kind;
+    mark.textContent = MARKS[kind];
+    textNode.textContent = text;
+  }
+
+  // 본체가 보낸 값을 믿기 전에 모양을 확인한다
+  function tidy(next) {
+    const out = Object.assign({}, data);
+    if (!next || typeof next !== 'object') return out;
+    if (typeof next.lang === 'string' && /^[a-z]{2}$/.test(next.lang)) out.lang = next.lang;
+    if (Array.isArray(next.languages)) out.languages = next.languages.filter((l) => l && typeof l.code === 'string' && typeof l.name === 'string');
+    const f = next.found || {};
+    out.found = {
+      transcripts: f.transcripts === true,
+      sessionFiles: Number.isFinite(f.sessionFiles) ? f.sessionFiles : 0,
+      app: f.app === true,
+      accounts: Number.isFinite(f.accounts) ? f.accounts : 0,
+    };
+    const h = next.hooks || {};
+    out.hooks = { status: ['on', 'off', 'failed'].includes(h.status) ? h.status : 'off', error: typeof h.error === 'string' ? h.error : '' };
+    return out;
+  }
+
+  // 화면 전체를 지금 값으로 그린다
+  function render() {
+    document.documentElement.lang = data.lang;
+    document.title = T('welcome.title');
+    for (const node of document.querySelectorAll('[data-i18n]')) node.textContent = T(node.dataset.i18n);
+    const f = data.found;
+    // 기록도 앱도 못 찾았으면 '찾았습니다' 대신 안내를 보여 준다
+    document.querySelector('.lead').textContent = (f.transcripts || f.app) ? T('welcome.lead') : T('welcome.leadMissing');
+    setRow(el.codeMark, el.codeText, f.transcripts ? 'ok' : 'bad', f.transcripts ? T('welcome.codeFound', f.sessionFiles) : T('welcome.codeMissing'));
+    setRow(el.appMark, el.appText, f.app ? 'ok' : 'warn', f.app ? T('welcome.appFound', f.accounts) : T('welcome.appMissing'));
+    const h = data.hooks;
+    if (h.status === 'on') setRow(el.hookMark, el.hookText, 'ok', T('welcome.hooksOn'));
+    else if (h.status === 'failed') setRow(el.hookMark, el.hookText, 'bad', T('welcome.hooksFailed', h.error));
+    else setRow(el.hookMark, el.hookText, 'warn', T('welcome.hooksOff'));
+    el.langSelect.textContent = '';
+    for (const item of data.languages) {
+      const option = document.createElement('option');
+      option.value = item.code;
+      option.textContent = item.name;
+      option.selected = item.code === data.lang;
+      el.langSelect.appendChild(option);
+    }
+  }
+
+  // 점검용: 지금 보여 주는 값
+  window.welcomeDebug = () => ({
+    lang: data.lang, code: el.codeMark.textContent + ' ' + el.codeText.textContent,
+    app: el.appMark.textContent + ' ' + el.appText.textContent, hooks: el.hookMark.textContent + ' ' + el.hookText.textContent,
+  });
+
+  // ── 진입점 ────────────────────────────────────────────────
+  render();
+  if (!api) return;
+  el.langSelect.addEventListener('change', () => api.setLanguage(el.langSelect.value));
+  el.recheck.addEventListener('click', () => api.welcomeRecheck());
+  el.start.addEventListener('click', () => api.closeWelcome());
+  window.addEventListener('keydown', (e) => { if (e.key === 'Escape') api.closeWelcome(); });
+  api.onWelcomeData((next) => { data = tidy(next); render(); });
+  api.welcomeReady();
+})();
+</script>
+</body>
+</html>

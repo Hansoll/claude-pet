@@ -1,0 +1,13 @@
+{
+  "id": "orange-pickle-3d",
+  "displayName": "모찌 3D",
+  "displayNames": {
+    "ko": "모찌 3D",
+    "en": "Mochi 3D"
+  },
+  "description": "모찌의 그림에 맞춰 만든 3D 펫",
+  "kind": "claude-pet-3d",
+  "modelPath": "model.json",
+  "matcapPath": "matcap.png",
+  "fallback": "orange-pickle"
+}

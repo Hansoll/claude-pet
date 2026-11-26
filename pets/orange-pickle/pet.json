@@ -1,0 +1,9 @@
+{
+  "id": "orange-pickle",
+  "displayName": "모찌",
+  "displayNames": { "ko": "모찌", "en": "Mochi" },
+  "description": "커서를 따라보고 작은 노트북으로 일하는 말랑한 주황색 친구",
+  "hidden": true,
+  "spriteVersionNumber": 2,
+  "spritesheetPath": "spritesheet.webp"
+}
